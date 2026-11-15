@@ -1,0 +1,14 @@
+{
+"intro": "Este es el segmentador de videos por temas, la herramienta que desarrollamos para la tesis. Divide un video largo en tramos, cada uno con un solo tema, y permite comparar cómo lo hace una persona, dos modelos de lenguaje y el sistema CAVA.",
+"lista": "A la izquierda está la biblioteca. Los videos de YouTube se agregan pegando el enlace, y también cargamos dos películas completas: Avengers Endgame y Spider-Man Brand New Day.",
+"franjas": "Abrimos un video. Debajo del reproductor está el selector: una línea de tiempo con franjas de colores. La amarilla son los capítulos que puso el creador en YouTube. La violeta, los cortes sugeridos por Claude Opus. Y la turquesa, los de Codex. Los modelos solo leen la transcripción, hecha localmente con Whisper: no ven la imagen ni los capítulos.",
+"hover": "Al pasar el mouse sobre un corte se ve su tema, el rango de tiempo, un resumen, y la razón por la que el modelo decidió cortar ahí. Con un clic, el video salta a ese punto.",
+"manual": "También se puede segmentar a mano. Con la tecla I se marca el inicio, con la O el fin, y se escribe el tema. El segmento aparece en la línea de tiempo y en la tabla, y se guarda solo.",
+"tabla": "Más abajo están los cortes sugeridos por cada fuente, con su resumen y su justificación. Con el botón más, se copian a mis segmentos.",
+"pelicula": "Ahora, las películas. En Endgame, de tres horas, aparece una cuarta franja: CAVA, que divide la película en tópicos, con un color por tópico.",
+"capas": "Abajo están las capas de CAVA: tópicos, tópicos finos, capítulos, un resumen de sesenta segundos, los highlights y los hilos narrativos. Al pasar el mouse se resaltan todos los tramos del mismo tópico. Y con control más la rueda, se hace zoom sobre la línea de tiempo.",
+"recop": "Con la recopilación se reproducen de corrido todos los tramos de un tópico o de una versión de CAVA, saltando de un tramo al siguiente.",
+"res_endgame": "Estos son los resultados. En Endgame, Claude propuso cuarenta y cinco segmentos y Codex cuarenta y uno, de unos cuatro minutos en promedio. Con una tolerancia de quince segundos, Codex coincide con Claude en veintinueve cortes: un F1 de cero coma sesenta y nueve. CAVA es mucho más fino, con trescientos cuarenta y nueve tramos de medio minuto, y encuentra el ochenta y seis por ciento de los cortes de Claude, frente al sesenta y dos por ciento de una referencia al azar.",
+"res_spider": "En Spider-Man, la coincidencia entre Claude y Codex baja a un F1 de cero coma cuarenta y nueve, y CAVA recupera el setenta y nueve por ciento de los cortes de Claude, otra vez por encima del azar. Cada análisis tomó alrededor de un minuto.",
+"cierre": "En resumen: solo con la transcripción, los modelos de lenguaje producen segmentaciones temáticas coherentes, y el segmentador permite verlas, compararlas, corregirlas y exportar los clips."
+}

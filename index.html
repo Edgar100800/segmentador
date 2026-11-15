@@ -1,0 +1,1087 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Segmentador de videos</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.4 system-ui, sans-serif; background: #15171a; color: #e6e6e6; display: grid; grid-template-columns: 280px 1fr; height: 100vh; }
+  aside { background: #1d2024; overflow-y: auto; border-right: 1px solid #2c3036; }
+  aside h1 { font-size: 15px; margin: 0; padding: 14px; border-bottom: 1px solid #2c3036; }
+  .vid { padding: 10px 14px; cursor: pointer; border-bottom: 1px solid #25292e; }
+  .vid:hover { background: #262a30; }
+  .vid.activo { background: #2d3440; border-left: 3px solid #4f9cff; }
+  .vid small { color: #8a9099; display: block; }
+  .vid .borrar { float: right; margin-left: 6px; padding: 1px 6px; font-size: 12px; opacity: 0; }
+  .vid:hover .borrar, .vid .borrar.confirmar { opacity: 1; }
+  button.confirmar, .vid .borrar.confirmar { background: #c43c3c; border-color: #c43c3c; color: #fff; }
+  #formAgregar { display: flex; gap: 6px; padding: 10px 14px; border-bottom: 1px solid #2c3036; }
+  .desc { padding: 8px 14px; border-bottom: 1px solid #25292e; font-size: 12px; color: #aab; word-break: break-all; }
+  .desc .prog { height: 4px; background: #2d3440; border-radius: 2px; margin-top: 5px; overflow: hidden; }
+  .desc .prog div { height: 100%; background: #4f9cff; transition: width .3s; }
+  .desc.listo { color: #5fd38d; }
+  .desc.error { color: #ff6f6f; }
+  .desc .x { float: right; cursor: pointer; color: #8a9099; }
+  main { display: flex; flex-direction: column; overflow-y: auto; }
+  .reproductor { background: #000; display: flex; justify-content: center; }
+  video { max-height: 52vh; width: 100%; }
+  .barra { padding: 10px 16px 4px; }
+  #timeline { position: relative; height: 34px; background: #24282d; border-radius: 4px; cursor: pointer; }
+  .seg { position: absolute; top: 0; bottom: 0; border-radius: 3px; opacity: .75; overflow: hidden; white-space: nowrap; font-size: 11px; padding: 2px 4px; color: #000; border-right: 1px solid #000; }
+  .seg.sel { opacity: 1; outline: 2px solid #fff; z-index: 2; }
+  /* guías: --c = color (amarillo creador, violeta IA) */
+  .linea { position: absolute; top: -4px; width: 2px; height: 42px; background: var(--c); opacity: .55; pointer-events: none; z-index: 3; }
+  .linea.ia, .linea.codex { top: 0; height: 46px; }
+  .franja { position: relative; height: 20px; margin-bottom: 4px; }
+  .franja:empty::after { content: attr(data-vacia); font-size: 11px; color: #666; padding-left: 4px; }
+  .guiab { position: absolute; top: 0; bottom: 0; background: color-mix(in srgb, var(--c) 18%, #15171a); border: 1px solid color-mix(in srgb, var(--c) 40%, transparent); border-radius: 3px; font-size: 11px; color: color-mix(in srgb, var(--c) 70%, #fff); padding: 2px 4px; overflow: hidden; white-space: nowrap; cursor: pointer; }
+  .guiab:nth-child(even) { background: color-mix(in srgb, var(--c) 10%, #15171a); }
+  .guiab:hover { background: var(--c); color: #000; z-index: 2; }
+  #capHover { position: absolute; top: 0; bottom: 0; background: color-mix(in srgb, var(--c) 22%, transparent); border-left: 2px solid var(--c); border-right: 2px solid var(--c); pointer-events: none; z-index: 4; }
+  #tip { position: fixed; max-height: 70vh; overflow: hidden; background: #000; color: #fff; border: 1px solid var(--c); border-radius: 4px; padding: 6px 8px; font-size: 12px; pointer-events: none; z-index: 10; max-width: 380px; }
+  #tip b { color: var(--c); }
+  #tip i { color: #aab; }
+  .oculta-creador .creador, .oculta-ia .ia, .oculta-codex .codex, .oculta-cava .cava { display: none; }
+  /* modo "Solo CAVA": esconde las otras guías (no tus segmentos) */
+  .solo-cava .creador, .solo-cava .ia, .solo-cava .codex { display: none; }
+  .solo-cava #btnGuia, .solo-cava #btnGuiaIA, .solo-cava #btnGuiaCodex { opacity: .4; }
+  #btnSoloCava.act { background: #ff8c69; border-color: #ff8c69; color: #000; }
+  /* barra inferior: capas de CAVA en paralelo, alineadas con la línea de tiempo */
+  #capasCava { margin-top: 8px; padding-top: 5px; border-top: 1px solid #2c3036; }
+  .oculta-capas #capasCava { display: none; }
+  .capas-cab { font-size: 11px; color: #8a9099; margin-bottom: 3px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .capas-cab b { color: #ff8c69; font-weight: 600; }
+  .zoom { display: flex; gap: 4px; align-items: center; }
+  .zoom button { padding: 0 7px; font-size: 12px; }
+  .zoom input[type=range] { width: 120px; accent-color: #ff8c69; }
+  #zInfo { min-width: 120px; text-align: right; font-variant-numeric: tabular-nums; color: #ccc; }
+  /* zoom estilo editor: el contenido (.zinner) se ensancha zoom × 100 % y su contenedor (.zscroll) se desplaza
+     en horizontal; la barra de arriba y las capas de abajo comparten zoom y desplazamiento */
+  .zoomBar { display: flex; gap: 6px; align-items: center; justify-content: flex-end; font-size: 11px; color: #8a9099; margin-bottom: 4px; flex-wrap: wrap; }
+  .zscroll { overflow-x: auto; overflow-y: hidden; }
+  .zscroll::-webkit-scrollbar { height: 9px; }
+  .zscroll::-webkit-scrollbar-thumb { background: #3a414c; border-radius: 4px; }
+  #cavaCorrida { background: #1d2024; color: #ff8c69; border: 1px solid #3a414c; border-radius: 4px; font: inherit; font-size: 11px; padding: 1px 4px; }
+  .zinner { position: relative; min-width: 100%; }
+  #barraInner { padding: 4px 0 6px; }
+  .regla { position: relative; height: 14px; margin-bottom: 3px; border-bottom: 1px solid #2c3036; cursor: pointer; }
+  .regla span { position: absolute; top: 0; bottom: 0; border-left: 1px solid #3a414c; font-size: 9px; color: #8a9099; padding-left: 3px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .capa { position: relative; height: 16px; margin-bottom: 2px; background: #1b1e22; border-radius: 2px; cursor: pointer; }
+  .capa .nom { position: sticky; left: 0; display: inline-block; font-size: 10px; line-height: 16px; color: #ddd; background: #15171ae6; padding: 0 5px; border-radius: 2px; z-index: 3; pointer-events: none; }
+  .cb { position: absolute; top: 1px; bottom: 1px; min-width: 2px; background: var(--c); opacity: .8; border-radius: 2px;
+        overflow: hidden; white-space: nowrap; font-size: 10px; line-height: 14px; color: transparent; padding: 0 3px; }
+  .cb.texto { color: #000; }
+  .cb:hover { opacity: 1; outline: 1px solid #fff; z-index: 2; }
+  #cabezalCava { position: absolute; top: -2px; bottom: 0; width: 2px; background: #fff; pointer-events: none; z-index: 4; }
+  /* al pasar sobre un tópico se resaltan todos sus tramos (en la franja y en las capas del mismo nivel) */
+  .resalta-cava #capasCava .cb:not(.mismo), .resalta-cava #sugCava .guiab:not(.mismo) { opacity: .15; }
+  .resalta-cava .mismo { opacity: 1; outline: 1px solid #fff; z-index: 2; }
+  #pendiente { position: absolute; top: 0; bottom: 0; background: repeating-linear-gradient(45deg, #ff5f5f66 0 6px, transparent 6px 12px); pointer-events: none; }
+  #cabezal { position: absolute; top: -4px; width: 2px; height: 42px; background: #fff; pointer-events: none; }
+  .estado { display: flex; gap: 16px; align-items: center; padding: 6px 16px; color: #aab; flex-wrap: wrap; }
+  .estado b { color: #fff; font-variant-numeric: tabular-nums; }
+  button { background: #2d3440; color: #e6e6e6; border: 1px solid #3a414c; border-radius: 4px; padding: 4px 9px; cursor: pointer; font: inherit; }
+  button:hover { background: #3a4454; }
+  button.prim { background: #2f6fd6; border-color: #2f6fd6; }
+  .lista { flex: 1 0 auto; min-height: 260px; padding: 0 16px 16px; }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; color: #8a9099; font-weight: 500; padding: 6px 4px; position: sticky; top: 0; background: #15171a; }
+  td { padding: 3px 4px; border-top: 1px solid #25292e; }
+  tr.sel td { background: #232a35; }
+  input[type=text] { background: #1d2024; color: #e6e6e6; border: 1px solid #3a414c; border-radius: 4px; padding: 4px 6px; font: inherit; width: 100%; }
+  input.t { width: 90px; font-variant-numeric: tabular-nums; }
+  .color { width: 10px; height: 22px; border-radius: 2px; }
+  .ayuda { color: #8a9099; font-size: 12px; padding: 4px 16px 8px; }
+  kbd { background: #2d3440; border: 1px solid #3a414c; border-radius: 3px; padding: 0 4px; font-size: 11px; color: #ddd; }
+  #guardado { margin-left: auto; font-size: 12px; }
+  .vacio td { color: #8a9099; padding: 10px 4px; }
+  h3 { font-size: 13px; font-weight: 600; margin: 18px 0 6px; display: flex; gap: 6px; align-items: center; }
+  .fuente.act { background: var(--c); color: #000; border-color: var(--c); }
+  #sugFilas td { vertical-align: top; }
+  /* recopilación: los tramos elegidos uno tras otro, como una sola línea de tiempo */
+  #recop { margin-top: 8px; padding-top: 5px; border-top: 1px solid #2c3036; }
+  #recop h3 { margin: 0 0 5px; flex-wrap: wrap; font-size: 12px; }
+  #recop h3 b { color: #ffd24f; }
+  #recSel { background: #1d2024; color: #e6e6e6; border: 1px solid #3a414c; border-radius: 4px; padding: 3px 5px; font: inherit; max-width: 520px; }
+  #recInfo { color: #ccc; font-weight: 400; font-variant-numeric: tabular-nums; }
+  #recBarra { position: relative; display: flex; height: 26px; background: #24282d; border-radius: 4px; overflow: hidden; cursor: pointer; }
+  #recBarra .rc { flex: none; height: 100%; background: var(--c); opacity: .55; border-right: 1px solid #15171a; font-size: 10px; line-height: 26px; color: #000; padding: 0 3px; overflow: hidden; white-space: nowrap; }
+  #recBarra .rc.act { opacity: 1; box-shadow: inset 0 0 0 2px #fff; }
+  #recCab { position: absolute; top: 0; bottom: 0; width: 2px; background: #fff; pointer-events: none; }
+  #recLista { max-height: 230px; overflow-y: auto; margin-top: 6px; }
+  #recFilas tr.act td { background: #3a2a24; }
+  #recFilas td { font-variant-numeric: tabular-nums; vertical-align: top; }
+  #recFilas td.dlg { color: #aab; font-size: 12px; font-style: italic; max-width: 420px; }
+  .cb.rec, .guiab.rec { box-shadow: inset 0 0 0 2px #ffd24f; opacity: 1; }
+  #recop .cerrada { display: none; }
+  #sugFilas .nota { color: #aab; font-size: 12px; }
+  #sugFilas .nota i { color: #8a9099; }
+</style>
+</head>
+<body>
+<aside>
+  <h1>Videos</h1>
+  <form id="formAgregar">
+    <input type="text" id="urlNueva" placeholder="Pega un link de YouTube…">
+    <button class="prim" type="submit">Agregar</button>
+  </form>
+  <div id="descargas"></div>
+  <div id="videos"></div>
+</aside>
+<main>
+  <div class="reproductor"><video id="video" controls preload="auto"></video></div>
+  <div class="barra">
+    <div class="zoomBar"><span><kbd>Ctrl</kbd>+rueda = zoom · rueda = desplazar · <kbd>+</kbd><kbd>-</kbd><kbd>0</kbd></span>
+      <span class="zoom">
+        <button id="zMenos" title="Alejar (tecla -)">−</button>
+        <input type="range" id="zRango" min="0" max="100" value="0" title="Zoom de la línea de tiempo (arriba y capas CAVA)">
+        <button id="zMas" title="Acercar (tecla +)">＋</button>
+        <button id="zAjustar" title="Ver el video completo (tecla 0)">Ajustar</button>
+        <label title="Mientras se reproduce, mueve la vista para que el cabezal no se salga"><input type="checkbox" id="zSeguir" checked> seguir cabezal</label>
+        <span id="zInfo"></span>
+      </span></div>
+    <div id="barraScroll" class="zscroll"><div id="barraInner" class="zinner">
+    <div id="regla" class="regla"></div>
+    <div id="capitulos" class="franja creador" style="--c:#ffd24f" data-vacia="El creador no puso capítulos"></div>
+    <div id="sugIA" class="franja ia" style="--c:#c58cff" data-vacia="Sin sugerencias de IA (botón Transcribir + analizar)"></div>
+    <div id="sugCodex" class="franja codex" style="--c:#4fd1c5" data-vacia="Sin sugerencias de Codex (python3 analizar.py ID --motor codex)"></div>
+    <div id="sugCava" class="franja cava" style="--c:#ff8c69" data-vacia="Sin datos de CAVA (python3 importar_cava.py cava/<carpeta>)"></div>
+    <div id="timeline"><div id="pendiente" hidden></div><div id="capHover" hidden></div><div id="cabezal"></div></div>
+    </div></div>
+    <div id="capasCava" hidden>
+      <div class="capas-cab"><b>Capas CAVA</b>
+        <select id="cavaCorrida" title="Corrida de CAVA que se muestra (franja, capas, tabla y recopilación)"></select>
+        <span id="capasMeta"></span>
+        <span>· mouse encima = todos los tramos del tópico · clic = ir</span></div>
+      <div id="capasScroll" class="zscroll"><div id="pistas" class="zinner"><div id="reglaCapas" class="regla"></div><div id="cabezalCava"></div></div></div>
+    </div>
+    <div id="recop" hidden>
+      <h3><b>Recopilación:</b>
+        <select id="recSel" title="Qué recopilar: un tópico (todos sus tramos en orden) o una versión/playlist de CAVA (en el orden en que CAVA la armó). También: doble clic sobre un tramo de CAVA"></select>
+        <button id="recPlay" class="prim" title="Reproducir la recopilación de corrido (tecla R)">▶ Reproducir</button>
+        <button id="recPrev" title="Tramo anterior">⏮</button><button id="recNext" title="Tramo siguiente">⏭</button>
+        <button id="recSalir" title="Salir de la recopilación">■ Salir</button>
+        <button id="recVer" title="Mostrar/ocultar la lista de tramos">Lista</button>
+        <span id="recInfo"></span>
+      </h3>
+      <div id="recBarra"><div id="recCab"></div></div>
+    </div>
+  </div>
+  <div id="tip" hidden></div>
+  <div class="estado">
+    <span>Tiempo <b id="tiempo">0:00.0</b> / <b id="duracion">0:00</b></span>
+    <span>Vel. <b id="vel">1x</b></span>
+    <span id="infoPend"></span>
+    <button id="btnCaps" title="Crear segmentos a partir de los capítulos de YouTube">Importar capítulos YT</button>
+    <button id="btnGuia" title="Mostrar/ocultar los capítulos del creador (tecla G)">Guía creador: on</button>
+    <button id="btnGuiaIA" title="Mostrar/ocultar los cortes sugeridos por la IA (tecla M)">Sugerencia IA: on</button>
+    <button id="btnGuiaCodex" title="Mostrar/ocultar los cortes sugeridos por Codex (tecla X)">Codex: on</button>
+    <button id="btnGuiaCava" title="Mostrar/ocultar la franja de tópicos de CAVA (tecla C)">CAVA: on</button>
+    <button id="btnCapas" title="Mostrar/ocultar la barra inferior con todas las capas de CAVA (tecla V)">Capas CAVA: on</button>
+    <button id="btnSoloCava" title="Ver solo CAVA: esconde las guías del creador, Opus y Codex (tecla S)">Solo CAVA</button>
+    <button id="btnAnalizar" class="prim" title="Transcribe con whisper (local) y pide los cortes al modelo, solo con el texto">Transcribir + analizar</button>
+    <button id="btnImportIA" title="Copiar las sugerencias de la IA a tus segmentos">Importar sugerencias IA</button>
+    <button id="btnSubs">Subtítulos: on</button>
+    <span id="guardado"></span>
+  </div>
+  <div class="ayuda">
+    <kbd>I</kbd> inicio · <kbd>O</kbd> fin · <kbd>K</kbd> cortar aquí (cierra y abre otro) · <kbd>Esc</kbd> cancelar ·
+    <kbd>Espacio</kbd> play · <kbd>←</kbd><kbd>→</kbd> ±5s (<kbd>Shift</kbd> ±1s, <kbd>Ctrl</kbd> ±30s) · <kbd>,</kbd><kbd>.</kbd> frame ·
+    <kbd>[</kbd><kbd>]</kbd> velocidad · <kbd>G</kbd> guía creador · <kbd>M</kbd> sugerencia IA · <kbd>X</kbd> Codex · <kbd>C</kbd> CAVA · <kbd>V</kbd> capas CAVA · <kbd>S</kbd> solo CAVA · <kbd>R</kbd> reproducir recopilación · <kbd>+</kbd><kbd>-</kbd><kbd>0</kbd> zoom · <kbd>Supr</kbd> borrar seleccionado · <kbd>J</kbd>/<kbd>L</kbd> segmento anterior/siguiente
+  </div>
+  <div class="lista">
+    <div id="recTabla" hidden>
+      <h3>Tramos de la recopilación <small id="recTitulo" style="color:#8a9099;font-weight:400"></small></h3>
+      <div id="recLista"><table>
+        <thead><tr><th>#</th><th>Tópico</th><th>Tema</th><th>Original</th><th>Dur.</th><th>En la recopilación</th><th>Diálogo</th><th></th></tr></thead>
+        <tbody id="recFilas"></tbody>
+      </table></div>
+    </div>
+    <table>
+      <thead><tr><th></th><th>#</th><th>Tema</th><th>Inicio</th><th>Fin</th><th>Dur.</th><th>Notas</th><th></th></tr></thead>
+      <tbody id="filas"></tbody>
+    </table>
+    <h3>Cortes sugeridos:
+      <button class="fuente" data-f="creador" style="--c:#ffd24f">Creador</button>
+      <button class="fuente" data-f="ia" style="--c:#c58cff">Opus</button>
+      <button class="fuente" data-f="codex" style="--c:#4fd1c5">Codex</button>
+      <button class="fuente" data-f="cava" style="--c:#ff8c69">CAVA</button>
+      <small id="sugMeta" style="color:#8a9099;font-weight:400"></small>
+    </h3>
+    <table>
+      <thead><tr><th>#</th><th>Tema</th><th>Inicio</th><th>Fin</th><th>Dur.</th><th>Notas (resumen · por qué corta)</th><th></th></tr></thead>
+      <tbody id="sugFilas"></tbody>
+    </table>
+  </div>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const video = $("video");
+const COLORES = ["#4f9cff", "#5fd38d", "#ffb84f", "#ff6f91", "#b38cff", "#4fd6d6", "#d6d64f", "#ff8c4f"];
+let datos = {}, cava = {}, actual = null, pendiente = null, selId = null, subsOn = true, timerGuardar = null;
+
+const fmt = s => {
+  if (s == null || isNaN(s)) return "";
+  const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), r = (s % 60).toFixed(1).padStart(4, "0");
+  return (h ? h + ":" + String(m).padStart(2, "0") : m) + ":" + r;
+};
+const parse = t => {
+  const p = String(t).trim().split(":").map(Number);
+  if (p.some(isNaN)) return null;
+  return p.reduce((acc, v) => acc * 60 + v, 0);
+};
+const segs = () => datos[actual].segmentos;
+const nuevoId = () => Math.max(0, ...segs().map(s => s.id || 0)) + 1;
+const ordenar = () => segs().sort((a, b) => a.inicio - b.inicio);
+
+async function cargar() {
+  datos = await (await fetch("/api/videos")).json();
+  const ids = Object.keys(datos);
+  if (!ids.length) { $("videos").innerHTML = '<div class="vid">No hay videos en ./videos</div>'; return; }
+  pintarLista();
+  abrir(localStorage.getItem("ultimo") in datos ? localStorage.getItem("ultimo") : ids[0]);
+}
+
+function pintarLista() {
+  $("videos").innerHTML = "";
+  for (const [id, v] of Object.entries(datos)) {
+    if (!v.archivo) continue;
+    const d = document.createElement("div");
+    d.className = "vid" + (id === actual ? " activo" : "");
+    d.innerHTML = `<button class="borrar" title="Borrar video y todos sus datos">🗑</button>${v.titulo}
+      <small>${id} · ${fmt(v.duracion)} · ${v.segmentos.length} segmentos</small>`;
+    d.onclick = () => abrir(id);
+    const btn = d.querySelector(".borrar");
+    btn.onclick = e => {
+      e.stopPropagation();
+      if (!btn.classList.contains("confirmar")) {
+        // primer clic: pide confirmación; se cancela solo a los 3 s
+        btn.classList.add("confirmar"); btn.textContent = "¿Borrar todo? clic otra vez";
+        setTimeout(() => { btn.classList.remove("confirmar"); btn.textContent = "🗑"; }, 3000);
+        return;
+      }
+      borrarVideo(id);
+    };
+    $("videos").appendChild(d);
+  }
+}
+
+async function borrarVideo(id) {
+  clearTimeout(timerGuardar);  // que un guardado pendiente no lo vuelva a escribir
+  delete datos[id];
+  localStorage.removeItem("t_" + id);
+  await fetch("/api/borrar", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) });
+  guardar();
+  if (actual === id) {
+    actual = null; video.removeAttribute("src"); video.innerHTML = ""; video.load();
+    $("filas").innerHTML = ""; $("capitulos").innerHTML = ""; $("sugIA").innerHTML = ""; $("sugCodex").innerHTML = ""; $("sugCava").innerHTML = ""; $("capasCava").hidden = true;
+    $("timeline").querySelectorAll(".seg,.linea").forEach(e => e.remove());
+    const resto = Object.keys(datos).filter(k => datos[k].archivo);
+    if (resto.length) return abrir(resto[0]);
+  }
+  pintarLista();
+}
+
+function abrir(id) {
+  actual = id; pendiente = null; selId = null;
+  localStorage.setItem("ultimo", id);
+  const v = datos[id];
+  video.innerHTML = "";
+  video.src = v.archivo;
+  if (v.subtitulos) {
+    const tr = document.createElement("track");
+    Object.assign(tr, { kind: "subtitles", src: v.subtitulos, srclang: "es", label: "Subtítulos", default: true });
+    video.appendChild(tr);
+  }
+  const t = parseFloat(localStorage.getItem("t_" + id));
+  video.addEventListener("loadedmetadata", () => {
+    if (t) video.currentTime = t;
+    if (video.textTracks[0]) video.textTracks[0].mode = subsOn ? "showing" : "hidden";
+    $("duracion").textContent = fmt(video.duration);
+    pintar();
+    if (zoomCapas > 1) { const sc = $("barraScroll"); sc.scrollLeft = video.currentTime / video.duration * sc.scrollWidth - sc.clientWidth * 0.2; }
+  }, { once: true });
+  $("btnCaps").disabled = !v.capitulos_youtube?.length;
+  cargarCava(id);
+  actualizarBotonesIA();
+  pintarLista(); pintar();
+}
+
+function pintar() {
+  if (!actual) return;
+  const dur = video.duration || datos[actual].duracion || 1;
+  const tl = $("timeline");
+  tl.querySelectorAll(".seg,.linea").forEach(e => e.remove());
+  for (const g of Object.values(GUIAS)) pintarGuia(g, dur);
+  pintarCapas(dur);
+  ordenar();
+  const tbody = $("filas"); tbody.innerHTML = "";
+  segs().forEach((s, i) => {
+    const color = COLORES[i % COLORES.length];
+    const b = document.createElement("div");
+    b.className = "seg" + (s.id === selId ? " sel" : "");
+    Object.assign(b.style, { left: (s.inicio / dur * 100) + "%", width: ((s.fin - s.inicio) / dur * 100) + "%", background: color });
+    b.textContent = s.tema; b.title = `${s.tema}  ${fmt(s.inicio)} → ${fmt(s.fin)}`;
+    b.onclick = e => { e.stopPropagation(); seleccionar(s.id, true); };
+    tl.appendChild(b);
+
+    const tr = document.createElement("tr");
+    if (s.id === selId) tr.className = "sel";
+    tr.innerHTML = `<td><div class="color" style="background:${color}"></div></td><td>${i + 1}</td>
+      <td><input type="text" data-k="tema" value="${(s.tema || "").replace(/"/g, "&quot;")}"></td>
+      <td><input type="text" class="t" data-k="inicio" value="${fmt(s.inicio)}"></td>
+      <td><input type="text" class="t" data-k="fin" value="${fmt(s.fin)}"></td>
+      <td>${fmt(s.fin - s.inicio)}</td>
+      <td><input type="text" data-k="notas" value="${(s.notas || "").replace(/"/g, "&quot;")}"></td>
+      <td style="white-space:nowrap"><button data-a="ir" title="Ir al inicio">▶</button>
+        <button data-a="ini" title="Inicio = tiempo actual">⇤</button><button data-a="fin" title="Fin = tiempo actual">⇥</button>
+        <button data-a="del" title="Borrar">✕</button></td>`;
+    tr.querySelectorAll("input").forEach(inp => {
+      inp.onfocus = () => { if (selId !== s.id) { selId = s.id; marcarSel(); } };
+      inp.onchange = () => {
+        const k = inp.dataset.k;
+        if (k === "inicio" || k === "fin") { const v = parse(inp.value); if (v == null) return pintar(); s[k] = v; pintar(); }
+        else s[k] = inp.value;
+        guardar(); if (k === "tema") pintarTimelineSolo();
+      };
+      inp.onkeydown = e => { if (e.key === "Enter" || e.key === "Escape") inp.blur(); };
+    });
+    tr.querySelector('[data-a=ir]').onclick = () => seleccionar(s.id, true);
+    tr.querySelector('[data-a=ini]').onclick = () => { s.inicio = video.currentTime; pintar(); guardar(); };
+    tr.querySelector('[data-a=fin]').onclick = () => { s.fin = video.currentTime; pintar(); guardar(); };
+    tr.querySelector('[data-a=del]').onclick = () => borrar(s.id);
+    tbody.appendChild(tr);
+  });
+  if (!segs().length) tbody.innerHTML = `<tr class="vacio"><td colspan="8">Aún no marcaste segmentos en este video:
+    usa <kbd>I</kbd>/<kbd>O</kbd>/<kbd>K</kbd>, o copia los cortes sugeridos de abajo (botón ＋ o "Importar").</td></tr>`;
+  pintarSugeridos();
+  pintarPendiente();
+  aplicarZoom();
+  marcarTramosRec();
+}
+
+// tabla de cortes sugeridos (creador / Opus / Codex), solo lectura; ＋ copia el corte a tus segmentos
+let fuenteSug = localStorage.getItem("fuente_sug") || "ia";
+function pintarSugeridos() {
+  const v = datos[actual], g = GUIAS[fuenteSug], dur = video.duration || v.duracion || 1;
+  const items = g.items(v) || [];
+  document.querySelectorAll(".fuente").forEach(b => b.classList.toggle("act", b.dataset.f === fuenteSug));
+  const info = { ia: v.sugerencias_info, codex: v.info_codex, cava: cava[actual] }[fuenteSug];
+  $("sugMeta").textContent = info ? `${info.modelo} · ${info.fecha?.replace("T", " ")}` : "";
+  const tbody = $("sugFilas"); tbody.innerHTML = "";
+  if (!items.length) {
+    tbody.innerHTML = `<tr class="vacio"><td colspan="7">${esc($(g.franja).dataset.vacia)}</td></tr>`;
+    return;
+  }
+  items.forEach((c, i) => {
+    const fin = c.fin ?? items[i + 1]?.inicio ?? dur;
+    const nota = [c.resumen && esc(c.resumen), c.razon && `<i>${esc(c.razon)}</i>`].filter(Boolean).join("<br>");
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${i + 1}</td><td>${esc(c.tema)}</td><td>${fmt(c.inicio)}</td><td>${fmt(fin)}</td>
+      <td>${fmt(fin - c.inicio)}</td><td class="nota">${nota || "—"}</td>
+      <td style="white-space:nowrap"><button data-a="ir" title="Ir al inicio">▶</button>
+        <button data-a="add" title="Copiar a mis segmentos">＋</button></td>`;
+    tr.querySelector("[data-a=ir]").onclick = () => { video.currentTime = c.inicio; };
+    tr.querySelector("[data-a=add]").onclick = () => {
+      segs().push({ id: nuevoId(), tema: c.tema, inicio: c.inicio, fin, notas: c.resumen || g.etiqueta });
+      pintar(); pintarLista(); guardar();
+    };
+    tbody.appendChild(tr);
+  });
+}
+document.querySelectorAll(".fuente").forEach(b => b.onclick = () => {
+  fuenteSug = b.dataset.f; localStorage.setItem("fuente_sug", fuenteSug); pintarSugeridos(); actualizarBotonesIA();
+});
+
+const esc = t => String(t ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+const GUIAS = {
+  creador: { franja: "capitulos", clase: "creador", color: "#ffd24f", titulo: "Capítulo {n} del creador",
+             items: v => v.capitulos_youtube, btn: "btnGuia", etiqueta: "Guía creador" },
+  ia: { franja: "sugIA", clase: "ia", color: "#c58cff", titulo: "Corte {n} sugerido",
+        items: v => v.sugerencias_modelo, btn: "btnGuiaIA", etiqueta: "Sugerencia IA" },
+  codex: { franja: "sugCodex", clase: "codex", color: "#4fd1c5", titulo: "Corte {n} sugerido por Codex",
+           items: v => v.sugerencias_codex, btn: "btnGuiaCodex", etiqueta: "Codex" },
+  // CAVA: un color por tópico (los que vuelven repiten color); sin líneas sobre la línea de tiempo (son cientos)
+  cava: { franja: "sugCava", clase: "cava", color: "#ff8c69", titulo: "Tramo {n} de CAVA",
+          items: () => cava[actual]?.segmentos, btn: "btnGuiaCava", etiqueta: "CAVA",
+          colorItem: c => colorTopico(c.topico), nivel: "default", sinLineas: true },
+};
+const colorTopico = t => `hsl(${(t * 137.508) % 360} 70% 62%)`;
+
+function pintarGuia(g, dur) {
+  const franja = $(g.franja); franja.innerHTML = "";
+  const items = g.items(datos[actual]) || [];
+  items.forEach((c, i) => {
+    const fin = c.fin ?? items[i + 1]?.inicio ?? dur;
+    if (!g.sinLineas) {
+      const l = document.createElement("div");
+      l.className = "linea " + g.clase; l.style.cssText = `--c:${g.color};left:${c.inicio / dur * 100}%`;
+      $("timeline").appendChild(l);
+    }
+    const b = document.createElement("div");
+    b.className = "guiab"; b.textContent = c.tema;
+    Object.assign(b.style, { left: (c.inicio / dur * 100) + "%", width: ((fin - c.inicio) / dur * 100) + "%" });
+    if (g.colorItem) { b.style.setProperty("--c", g.colorItem(c)); b.dataset.t = g.nivel + ":" + c.topico; }
+    b.onmouseenter = () => { mostrarCap(g, c, fin, i, dur); if (g.colorItem) resaltar(b.dataset.t); };
+    b.onmousemove = e => moverTip(e);
+    b.onmouseleave = () => { ocultarCap(); resaltar(null); };
+    b.onclick = () => { video.currentTime = c.inicio; };
+    if (g.colorItem) b.ondblclick = () => elegirRec(`t:default:${c.topico}`, true);
+    franja.appendChild(b);
+  });
+}
+
+function mostrarCap(g, c, fin, i, dur) {
+  const h = $("capHover"), col = g.colorItem ? g.colorItem(c) : g.color;
+  Object.assign(h.style, { left: (c.inicio / dur * 100) + "%", width: ((fin - c.inicio) / dur * 100) + "%" });
+  h.style.setProperty("--c", col); $("tip").style.setProperty("--c", col);
+  h.hidden = false;
+  $("tip").innerHTML = `<b>${g.titulo.replace("{n}", i + 1)}</b><br>${esc(c.tema)}<br>
+    ${fmt(c.inicio)} → ${fmt(fin)} &nbsp;(${fmt(fin - c.inicio)})`
+    + (c.resumen ? `<br><br>${esc(c.resumen)}` : "")
+    + (c.razon ? `<br><i>Por qué corta aquí: ${esc(c.razon)}</i>` : "")
+    + `<br><small>clic para ir al inicio</small>`;
+  $("tip").hidden = false;
+}
+function moverTip(e) {
+  const tip = $("tip");
+  tip.style.left = Math.min(e.clientX + 12, innerWidth - tip.offsetWidth - 8) + "px";
+  // debajo del cursor; si no cabe, encima (los recuadros de CAVA pueden ser altos)
+  tip.style.top = (e.clientY + 16 + tip.offsetHeight > innerHeight ? Math.max(4, e.clientY - 12 - tip.offsetHeight) : e.clientY + 16) + "px";
+}
+function ocultarCap() { $("capHover").hidden = true; $("tip").hidden = true; }
+
+// --- corridas de CAVA: cada video puede tener varias (sugerencias/<ID>.cava.<corrida>.json); se ve una a la vez ---
+function corridaElegida(id) {
+  const l = datos[id]?.cava_corridas || [];
+  return l.find(c => c.id === localStorage.getItem("cava_corrida_" + id)) || l[l.length - 1];  // por defecto, la más nueva
+}
+function cargarCava(id) {
+  const c = corridaElegida(id), sel = $("cavaCorrida");
+  if (id === actual) {
+    const l = datos[id]?.cava_corridas || [];
+    sel.innerHTML = l.map(x => `<option value="${esc(x.id)}">${esc(x.id)}</option>`).join("");
+    sel.hidden = l.length < 2;
+    if (c) sel.value = c.id;
+  }
+  if (!c) { delete cava[id]; return; }
+  if (cava[id]?.url === c.url) return;
+  fetch(c.url).then(r => r.json()).then(d => {
+    if (corridaElegida(id)?.url !== c.url) return;  // se cambió de corrida mientras cargaba
+    cava[id] = { url: c.url, ...d };
+    if (actual === id) { salirRec(); pintar(); }
+  });
+}
+$("cavaCorrida").onchange = () => { localStorage.setItem("cava_corrida_" + actual, $("cavaCorrida").value); cargarCava(actual); };
+
+// diálogo exacto dentro de [a, b] (solo si la corrida trae transcripcion.jsonl)
+function dialogoEn(a, b, max = 320) {
+  const dl = cava[actual]?.dialogo;
+  if (!dl?.length) return "";
+  const txt = dl.filter(([t0, t1]) => t1 > a && t0 < b).map(x => x[2]).join(" ");
+  return txt.length > max ? txt.slice(0, max) + "…" : txt;
+}
+
+// barra inferior: una fila por capa de CAVA (niveles de tópicos y versiones), todas a la misma escala
+function pintarCapas(dur) {
+  const d = cava[actual], panel = $("capasCava"), pistas = $("pistas");
+  pistas.querySelectorAll(".capa").forEach(e => e.remove());
+  panel.hidden = !d;
+  $("recop").hidden = !d;
+  $("recTabla").hidden = !d || localStorage.getItem("rec_lista") === "off";
+  if (!d) { salirRec(); return; }
+  armarSelectorRec();
+  $("capasMeta").textContent = `${d.modelo} · ${d.fecha?.replace("T", " ")} · ${Object.keys(d.topicos.default).length} tópicos · voces ${d.voces.join(" ")}`
+    + (d.dialogo?.length ? ` · diálogo: ${d.dialogo.length} frases` : " · sin transcripción propia");
+  for (const capa of d.capas) {
+    const fila = document.createElement("div");
+    fila.className = "capa";  // sin title: el tooltip del navegador tapaba el recuadro propio
+    fila.innerHTML = `<span class="nom">${esc(capa.nombre)} · ${capa.items.length}</span>`;
+    fila.onclick = e => { const r = fila.getBoundingClientRect(); video.currentTime = (e.clientX - r.left) / r.width * dur; };
+    for (const it of capa.items) {
+      const b = document.createElement("div");
+      b.className = "cb"; b.dataset.t = capa.nivel + ":" + it.topico; b.textContent = it.tema;
+      b.dataset.k = it.playlist != null ? `v:${capa.clave}:${it.playlist}` : "";
+      b.ondblclick = e => { e.stopPropagation(); elegirRec(b.dataset.k || `t:${capa.nivel}:${it.topico}`, true); };
+      b.dataset.d = it.fin - it.inicio;
+      b.style.cssText = `--c:${colorTopico(it.topico)};left:${it.inicio / dur * 100}%;width:${(it.fin - it.inicio) / dur * 100}%`;
+      b.onmouseenter = () => { tipCava(capa, it, dur); resaltar(b.dataset.t); };
+      b.onmousemove = e => moverTip(e);
+      b.onmouseleave = () => { ocultarCap(); resaltar(null); };
+      b.onclick = e => { e.stopPropagation(); video.currentTime = it.inicio; };
+      fila.appendChild(b);
+    }
+    pistas.appendChild(fila);
+  }
+}
+
+// --- zoom y desplazamiento (como la línea de tiempo de un editor) ---
+// La barra de arriba (#barraScroll) manda: su ancho define la vista; las capas de CAVA (#capasScroll) la siguen.
+const ZMAX = 80;  // con 80× una película de 3 h queda a ~10 px por segundo
+let zoomCapas = Math.min(ZMAX, Math.max(1, parseFloat(localStorage.getItem("zoom_capas")) || 1));
+const durCapas = () => video.duration || datos[actual]?.duracion || 1;
+const SCROLLS = ["barraScroll", "capasScroll"];
+
+function aplicarZoom(tAncla, xAncla) {
+  // tAncla/xAncla: el instante que debe quedar bajo la posición x (px dentro de la vista) tras el zoom
+  const sc = $("barraScroll"), vista = sc.clientWidth, dur = durCapas();
+  if (!vista || !actual) return;
+  if (tAncla == null) { tAncla = (sc.scrollLeft + vista / 2) / (sc.scrollWidth || vista) * dur; xAncla = vista / 2; }
+  const ancho = vista * zoomCapas;
+  $("barraInner").style.width = $("pistas").style.width = ancho + "px";
+  for (const id of SCROLLS) {
+    $(id).style.overflowX = zoomCapas > 1.001 ? "auto" : "hidden";  // a 1× no hay nada que desplazar
+    $(id).scrollLeft = tAncla / dur * ancho - xAncla;
+  }
+  $("zRango").value = Math.round(Math.log(zoomCapas) / Math.log(ZMAX) * 100);
+  $("zInfo").textContent = `${zoomCapas.toFixed(zoomCapas < 10 ? 1 : 0)}× · ${fmt(vista / ancho * dur).replace(/\.\d$/, "")} visibles`;
+  localStorage.setItem("zoom_capas", zoomCapas);
+  // texto dentro de los tramos de las capas solo si caben (≥ 46 px)
+  const pxs = ancho / dur;
+  document.querySelectorAll("#pistas .cb").forEach(b => b.classList.toggle("texto", b.dataset.d * pxs >= 46));
+  pintarRegla(ancho, dur);
+}
+
+function pintarRegla(ancho, dur) {
+  const PASOS = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600];
+  const paso = PASOS.find(p => p / dur * ancho >= 70) || 3600;
+  for (const regla of document.querySelectorAll(".regla")) {
+    regla.innerHTML = "";
+    for (let t = 0; t < dur; t += paso) {
+      const m = document.createElement("span");
+      m.style.left = (t / dur * 100) + "%";
+      m.textContent = fmt(t).replace(/\.\d$/, "");
+      regla.appendChild(m);
+    }
+    regla.onclick = e => { const r = regla.getBoundingClientRect(); video.currentTime = (e.clientX - r.left) / r.width * dur; };
+  }
+}
+
+function zoomA(z, e) {
+  const sc = e?.currentTarget?.classList?.contains("zscroll") ? e.currentTarget : $("barraScroll");
+  const r = sc.getBoundingClientRect();
+  const x = e ? e.clientX - r.left : sc.clientWidth / 2;
+  const t = (sc.scrollLeft + x) / sc.scrollWidth * durCapas();
+  zoomCapas = Math.min(ZMAX, Math.max(1, z));
+  aplicarZoom(t, x);
+}
+
+for (const id of SCROLLS) {
+  const sc = $(id);
+  sc.addEventListener("wheel", e => {
+    if (e.ctrlKey) { e.preventDefault(); zoomA(zoomCapas * (e.deltaY < 0 ? 1.25 : 0.8), e); }
+    else if (zoomCapas > 1 && !e.shiftKey && Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+      e.preventDefault(); sc.scrollLeft += e.deltaY;  // rueda normal = desplazar en horizontal
+    }
+  }, { passive: false });
+  // desplazar una barra mueve la otra
+  sc.addEventListener("scroll", () => {
+    for (const otro of SCROLLS) if (otro !== id && Math.abs($(otro).scrollLeft - sc.scrollLeft) > 1) $(otro).scrollLeft = sc.scrollLeft;
+  });
+}
+$("zMas").onclick = () => zoomA(zoomCapas * 1.5);
+$("zMenos").onclick = () => zoomA(zoomCapas / 1.5);
+$("zAjustar").onclick = () => zoomA(1);
+$("zRango").oninput = () => {
+  // el zoom con el control deslizante deja el cabezal donde está en pantalla
+  const sc = $("barraScroll"), dur = durCapas();
+  zoomCapas = Math.pow(ZMAX, $("zRango").value / 100);
+  const x = Math.min(sc.clientWidth, Math.max(0, video.currentTime / dur * sc.scrollWidth - sc.scrollLeft));
+  aplicarZoom(video.currentTime, x);
+};
+$("zSeguir").checked = localStorage.getItem("seguir_capas") !== "off";
+$("zSeguir").onchange = () => localStorage.setItem("seguir_capas", $("zSeguir").checked ? "on" : "off");
+addEventListener("resize", () => aplicarZoom());
+
+function seguirCabezal(forzar) {
+  if (!$("zSeguir").checked || zoomCapas <= 1) return;
+  const sc = $("barraScroll"), x = video.currentTime / durCapas() * sc.scrollWidth;
+  if (forzar || x < sc.scrollLeft || x > sc.scrollLeft + sc.clientWidth - 30) sc.scrollLeft = x - sc.clientWidth * 0.2;
+}
+video.addEventListener("seeked", () => seguirCabezal());
+
+// --- recopilación: reproduce de corrido los tramos de un tópico o de una versión/playlist de CAVA ---
+// clave "t:<nivel>:<tópico>" -> todos los tramos del tópico en orden cronológico
+// clave "v:<versión>:<playlist>" -> los clips en el orden en que CAVA armó esa playlist
+const rec = { clave: null, clips: [], i: 0, activa: false, vid: null };
+
+function capaDe(clave) { return cava[actual]?.capas.find(c => c.clave === clave); }
+
+function clipsRec(clave) {
+  const [tipo, a, b] = clave.split(":");
+  if (tipo === "v") return (capaDe(a)?.items || []).filter(it => it.playlist === +b).map(it => ({ ...it, capa: a }));
+  return (capaDe(a)?.items || []).filter(it => it.topico === +b).sort((x, y) => x.inicio - y.inicio).map(it => ({ ...it, capa: a }));
+}
+
+function nombreRec(clave) {
+  const d = cava[actual], [tipo, a, b] = clave.split(":"), clips = clipsRec(clave);
+  const total = fmt(clips.reduce((s, c) => s + c.fin - c.inicio, 0)).replace(/\.\d$/, "");
+  if (tipo === "t") {
+    const t = d.topicos[a]?.[b] || {};
+    return `${a === "fine" ? "Tópico fino" : "Tópico"} ${b} · ${t.tema} · ${clips.length} tramos · ${total}`;
+  }
+  const capa = capaDe(a), varias = new Set(capa.items.map(x => x.playlist)).size > 1;
+  let extra = "";
+  if (varias) {
+    // nombre de la playlist: la voz que sigue, o el tópico que más tiempo ocupa
+    const voz = clips.find(c => c.voz)?.voz;
+    const peso = {}; clips.forEach(c => peso[c.topico] = (peso[c.topico] || 0) + c.fin - c.inicio);
+    const top = Object.entries(peso).sort((x, y) => y[1] - x[1])[0]?.[0];
+    extra = ` ${+b + 1}` + (voz ? ` (voz ${voz})` : top != null ? ` (sobre todo: ${d.topicos.default[top]?.tema})` : "");
+  }
+  return `${capa.nombre}${extra} · ${clips.length} clips · ${total}`;
+}
+
+function armarSelectorRec() {
+  const d = cava[actual], sel = $("recSel");
+  if (sel.dataset.vid === actual + d.url) return;  // ya armado para este video
+  sel.dataset.vid = actual + d.url;
+  const versiones = [], topicos = [];
+  for (const capa of d.capas) {
+    if (capa.clave === "default" || capa.clave === "fine") continue;
+    for (const p of [...new Set(capa.items.map(x => x.playlist))]) versiones.push(`v:${capa.clave}:${p}`);
+  }
+  // tópicos del nivel default, de más a menos tiempo en pantalla
+  Object.entries(d.topicos.default).sort((x, y) => y[1].duracion - x[1].duracion).forEach(([id]) => topicos.push(`t:default:${id}`));
+  const opts = l => l.map(k => `<option value="${k}">${esc(nombreRec(k))}</option>`).join("");
+  sel.innerHTML = `<optgroup label="Versiones de CAVA (en su orden)">${opts(versiones)}</optgroup>`
+    + `<optgroup label="Tópicos (todos sus tramos, en orden; de más a menos tiempo)">${opts(topicos)}</optgroup>`;
+  const guardada = localStorage.getItem("rec_" + actual + ":" + (cava[actual]?.corrida || ""));
+  elegirRec(guardada && clipsRec(guardada).length ? guardada : versiones[0] || topicos[0]);
+}
+
+function elegirRec(clave, reproducir) {
+  const sel = $("recSel");
+  if (![...sel.options].some(o => o.value === clave)) {  // p. ej. un tópico fino (doble clic en esa capa)
+    const o = document.createElement("option"); o.value = clave; o.textContent = nombreRec(clave); sel.appendChild(o);
+  }
+  sel.value = clave;
+  rec.activa = false; rec.clave = clave; rec.clips = clipsRec(clave); rec.i = 0; rec.vid = actual;
+  localStorage.setItem("rec_" + actual + ":" + (cava[actual]?.corrida || ""), clave);
+  $("recTitulo").textContent = "· " + nombreRec(clave);
+  pintarRec();
+  if (reproducir) iniciarRec(0);
+}
+
+const durRec = () => rec.clips.reduce((s, c) => s + c.fin - c.inicio, 0);
+const antesDe = i => rec.clips.slice(0, i).reduce((s, c) => s + c.fin - c.inicio, 0);
+
+function pintarRec() {
+  const total = durRec() || 1, barra = $("recBarra"), tbody = $("recFilas");
+  barra.querySelectorAll(".rc").forEach(e => e.remove()); tbody.innerHTML = "";
+  rec.clips.forEach((c, i) => {
+    const dc = c.fin - c.inicio, b = document.createElement("div");
+    b.className = "rc"; b.style.cssText = `--c:${colorTopico(c.topico)};width:${dc / total * 100}%`;
+    b.textContent = c.tema;
+    b.onmouseenter = () => tipCava(capaDe(c.capa), c, durCapas());
+    b.onmousemove = e => moverTip(e); b.onmouseleave = ocultarCap;
+    barra.insertBefore(b, $("recCab"));
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${i + 1}</td><td><span class="color" style="display:inline-block;height:12px;background:${colorTopico(c.topico)}"></span> ${c.topico}</td>
+      <td>${esc(c.tema)}</td><td>${fmt(c.inicio)} → ${fmt(c.fin)}</td><td>${fmt(dc)}</td><td>${fmt(antesDe(i))}</td>
+      <td class="dlg">${esc(dialogoEn(c.inicio, c.fin, 160)) || "—"}</td>
+      <td><button title="Reproducir desde este tramo">▶</button></td>`;
+    tr.querySelector("button").onclick = () => iniciarRec(i);
+    tbody.appendChild(tr);
+  });
+  marcarTramosRec();
+  marcarRec();
+}
+
+// tramos de la recopilación marcados en la franja y en las capas (se repite tras cada repintado)
+function marcarTramosRec() {
+  document.querySelectorAll(".rec").forEach(e => e.classList.remove("rec"));
+  if (!rec.clave || rec.vid !== actual) return;
+  if (rec.clave.startsWith("v:")) document.querySelectorAll(`.cb[data-k="${rec.clave}"]`).forEach(e => e.classList.add("rec"));
+  else document.querySelectorAll(`[data-t="${rec.clave.slice(2)}"]`).forEach(e => e.classList.add("rec"));
+}
+
+function marcarRec() {
+  const t = video.currentTime, c = rec.clips[rec.i], total = durRec() || 1;
+  const dentro = c && t >= c.inicio - 0.5 && t <= c.fin + 0.5;
+  const pos = antesDe(rec.i) + (dentro ? Math.min(c.fin, Math.max(c.inicio, t)) - c.inicio : 0);
+  $("recCab").style.left = (pos / total * 100) + "%";
+  $("recBarra").querySelectorAll(".rc").forEach((b, i) => b.classList.toggle("act", rec.activa && i === rec.i));
+  $("recFilas").querySelectorAll("tr").forEach((tr, i) => tr.classList.toggle("act", rec.activa && i === rec.i));
+  $("recInfo").textContent = rec.clips.length
+    ? `${rec.activa ? "▶ " : ""}tramo ${rec.i + 1}/${rec.clips.length} · ${fmt(pos).replace(/\.\d$/, "")} / ${fmt(total).replace(/\.\d$/, "")} de recopilación`
+    : "";
+  $("recPlay").textContent = rec.activa && !video.paused ? "❚❚ Pausa" : "▶ Reproducir";
+}
+
+function iniciarRec(i, desde) {
+  if (!rec.clips.length) return;
+  rec.i = Math.max(0, Math.min(rec.clips.length - 1, i));
+  video.currentTime = desde ?? rec.clips[rec.i].inicio;
+  rec.activa = true; video.play();
+  requestAnimationFrame(bucleRec);
+}
+
+function salirRec() {
+  if (rec.activa) video.pause();
+  rec.activa = false;
+  if (rec.clips.length) marcarRec();
+}
+
+function bucleRec() {
+  // rAF en vez de timeupdate (que llega cada ~250 ms) para cortar justo al final de cada tramo
+  if (!rec.activa || rec.vid !== actual) return;
+  const t = video.currentTime, c = rec.clips[rec.i];
+  if (t >= c.fin - 0.04) {
+    if (rec.i + 1 >= rec.clips.length) { video.pause(); video.currentTime = c.fin; rec.activa = false; marcarRec(); return; }
+    rec.i++;
+    const sig = rec.clips[rec.i];
+    if (Math.abs(sig.inicio - t) > 0.3) video.currentTime = sig.inicio;  // tramos pegados: sigue sin saltar
+  } else if (t < c.inicio - 0.6 || t > c.fin + 0.6) {
+    // el usuario se movió: si cayó en otro tramo de la recopilación sigue desde ahí, si no, sale
+    const j = rec.clips.findIndex(x => t >= x.inicio && t < x.fin);
+    if (j < 0) { rec.activa = false; marcarRec(); return; }
+    rec.i = j;
+  }
+  marcarRec();
+  requestAnimationFrame(bucleRec);
+}
+
+$("recSel").onchange = () => elegirRec($("recSel").value);
+$("recPlay").onclick = () => {
+  if (rec.activa && !video.paused) return video.pause(), marcarRec();
+  const c = rec.clips[rec.i];
+  // reanuda si el cabezal sigue dentro del tramo actual; si no, empieza ese tramo
+  iniciarRec(rec.i, c && video.currentTime >= c.inicio && video.currentTime < c.fin - 0.1 ? video.currentTime : undefined);
+};
+$("recPrev").onclick = () => iniciarRec(rec.i - 1);
+$("recNext").onclick = () => iniciarRec(rec.i + 1);
+$("recSalir").onclick = salirRec;
+$("recVer").onclick = () => {
+  $("recTabla").hidden = !$("recTabla").hidden; localStorage.setItem("rec_lista", $("recTabla").hidden ? "off" : "on");
+  if (!$("recTabla").hidden) $("recTabla").scrollIntoView({ block: "nearest", behavior: "smooth" }); };
+$("recBarra").onclick = e => {
+  const r = $("recBarra").getBoundingClientRect(), objetivo = (e.clientX - r.left) / r.width * durRec();
+  let acc = 0;
+  for (let i = 0; i < rec.clips.length; i++) {
+    const dc = rec.clips[i].fin - rec.clips[i].inicio;
+    if (objetivo <= acc + dc) return iniciarRec(i, rec.clips[i].inicio + (objetivo - acc));
+    acc += dc;
+  }
+};
+video.addEventListener("pause", () => { if (rec.clips.length) marcarRec(); });
+
+function tipCava(capa, it, dur) {
+  const t = cava[actual].topicos[capa.nivel][it.topico] || {}, col = colorTopico(it.topico);
+  const corto = (x, n) => x && x.length > n ? x.slice(0, n) + "…" : x;
+  const h = $("capHover");
+  Object.assign(h.style, { left: (it.inicio / dur * 100) + "%", width: ((it.fin - it.inicio) / dur * 100) + "%" });
+  h.style.setProperty("--c", col); $("tip").style.setProperty("--c", col); h.hidden = false;
+  const extra = [it.playlist != null && capa.items.some(x => x.playlist) ? `playlist ${it.playlist + 1}` : "", it.voz ? `voz ${it.voz}` : ""].filter(Boolean).join(" · ");
+  const dlg = dialogoEn(it.inicio, it.fin);
+  let html;
+  if (it.escena != null) {
+    // escena F2 (EXP-036): lo propio de la escena primero, el tópico dominante como contexto
+    html = `<b>${esc(capa.nombre)} · escena ${it.escena}</b><br>${fmt(it.inicio)} → ${fmt(it.fin)} &nbsp;(${fmt(it.fin - it.inicio)})`
+      + `<br><i>Tópico dominante ${it.topico} (pureza ${Math.round(it.pureza * 100)} %): ${esc(t.tema_registro || t.tema || "")}</i>`
+      + (it.brief ? `<br><br><b>Brief F1:</b> ${esc(corto(it.brief, 420))}` : "<br><br><i>Sin brief F1 para esta escena</i>")
+      + (it.personajes ? `<br><i>Personajes: ${esc(it.personajes)}</i>` : "");
+  } else {
+    html = `<b>${esc(capa.nombre)} · tópico ${it.topico}</b>${extra ? " · " + esc(extra) : ""}<br>${esc(t.tema || it.tema)}<br>
+      ${fmt(it.inicio)} → ${fmt(it.fin)} &nbsp;(${fmt(it.fin - it.inicio)})`
+      + (t.descripcion ? `<br><br>${esc(t.descripcion)}` : "")
+      + (t.personajes ? `<br><i>Personajes: ${esc(t.personajes)}</i>` : "")
+      + (t.personajes_registro ? `<br><i>Nombres (registro): ${esc(t.personajes_registro)}</i>` : "")
+      + `<br><i>${t.tramos} tramos · vuelve ${t.retornos} veces · ${(t.duracion / 60).toFixed(1)} min en total</i>`
+      + (t.voces ? `<br><i>Voces: ${esc(t.voces)}</i>` : "")
+      + (t.senales ? `<br><i>Acuerdo de señales: ${esc(t.senales)}</i>` : "")
+      + (t.revisar ? `<br>⚠ CAVA lo marca para revisión` : "")
+      + (t.brief_f1 ? `<br><br><b>Brief F1:</b> ${esc(corto(t.brief_f1, 360))}` : "")
+      + (t.brief && !t.brief_f1 ? `<br><br><b>Brief:</b> ${esc(corto(t.brief.replace(/\s+/g, " "), 360))}` : "");
+  }
+  $("tip").innerHTML = html
+    + (dlg ? `<br><br><b>Diálogo:</b> «${esc(dlg)}»` : "")
+    + `<br><small>${esc(capa.descripcion)}</small>`
+    + `<br><small>clic para ir al inicio · doble clic para recopilar</small>`;
+  $("tip").hidden = false;
+}
+
+function resaltar(clave) {
+  document.querySelectorAll(".mismo").forEach(e => e.classList.remove("mismo"));
+  document.body.classList.toggle("resalta-cava", !!clave);
+  if (clave) document.querySelectorAll(`[data-t="${clave}"]`).forEach(e => e.classList.add("mismo"));
+}
+
+function aplicarCava() {
+  const capas = localStorage.getItem("capas_cava") !== "off", solo = localStorage.getItem("solo_cava") === "on";
+  document.body.classList.toggle("oculta-capas", !capas);
+  document.body.classList.toggle("solo-cava", solo);
+  $("btnCapas").textContent = "Capas CAVA: " + (capas ? "on" : "off");
+  $("btnSoloCava").classList.toggle("act", solo);
+  if (capas && actual && cava[actual]) aplicarZoom();
+}
+function alternarSoloCava() {
+  const solo = localStorage.getItem("solo_cava") !== "on";
+  localStorage.setItem("solo_cava", solo ? "on" : "off");
+  if (solo) {  // entrar: se ven la franja, las capas y la tabla de CAVA
+    localStorage.setItem("guia_cava", "on"); localStorage.setItem("capas_cava", "on");
+    localStorage.setItem("fuente_prev", fuenteSug); fuenteSug = "cava";
+  } else fuenteSug = localStorage.getItem("fuente_prev") || "ia";
+  localStorage.setItem("fuente_sug", fuenteSug);
+  aplicarGuia(); aplicarCava(); if (actual) { pintarSugeridos(); actualizarBotonesIA(); }
+}
+
+function aplicarGuia() {
+  for (const [k, g] of Object.entries(GUIAS)) {
+    const on = localStorage.getItem("guia_" + k) !== "off";
+    document.body.classList.toggle("oculta-" + g.clase, !on);
+    $(g.btn).textContent = g.etiqueta + ": " + (on ? "on" : "off");
+  }
+  ocultarCap();
+}
+function alternarGuia(k) {
+  localStorage.setItem("guia_" + k, localStorage.getItem("guia_" + k) === "off" ? "on" : "off");
+  aplicarGuia();
+}
+
+function pintarTimelineSolo() {
+  $("timeline").querySelectorAll(".seg").forEach((b, i) => { b.textContent = segs()[i].tema; });
+}
+
+function marcarSel() {
+  const lista = segs();
+  $("timeline").querySelectorAll(".seg").forEach((b, i) => b.classList.toggle("sel", lista[i].id === selId));
+  $("filas").querySelectorAll("tr").forEach((tr, i) => tr.classList.toggle("sel", lista[i].id === selId));
+}
+
+function pintarPendiente() {
+  const p = $("pendiente"), dur = video.duration || 1;
+  if (pendiente == null) { p.hidden = true; $("infoPend").textContent = ""; return; }
+  const a = Math.min(pendiente, video.currentTime), b = Math.max(pendiente, video.currentTime);
+  p.hidden = false; p.style.left = (a / dur * 100) + "%"; p.style.width = ((b - a) / dur * 100) + "%";
+  $("infoPend").innerHTML = `Marcando desde <b>${fmt(pendiente)}</b> (O para cerrar)`;
+}
+
+function seleccionar(id, saltar) {
+  selId = id; marcarSel();
+  const s = segs().find(x => x.id === id);
+  if (saltar && s) video.currentTime = s.inicio;
+}
+
+function borrar(id) {
+  datos[actual].segmentos = segs().filter(s => s.id !== id);
+  if (selId === id) selId = null;
+  pintar(); pintarLista(); guardar();
+}
+
+function cerrarSegmento(t) {
+  if (pendiente == null) return null;
+  const inicio = Math.min(pendiente, t), fin = Math.max(pendiente, t);
+  pendiente = null;
+  if (fin - inicio < 0.2) { pintarPendiente(); return null; }
+  const s = { id: nuevoId(), tema: `Tema ${segs().length + 1}`, inicio: +inicio.toFixed(2), fin: +fin.toFixed(2), notas: "" };
+  segs().push(s); selId = s.id;
+  pintar(); pintarLista(); guardar();
+  return s;
+}
+
+function enfocarTema(s) {
+  const i = segs().indexOf(s);
+  const inp = $("filas").querySelectorAll("tr")[i]?.querySelector('[data-k=tema]');
+  if (inp) { inp.focus(); inp.select(); }
+}
+
+function guardar() {
+  $("guardado").textContent = "guardando…";
+  clearTimeout(timerGuardar);
+  timerGuardar = setTimeout(async () => {
+    try {
+      const r = await fetch("/api/segmentos", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(datos) });
+      $("guardado").textContent = r.ok ? "✓ guardado " + new Date().toLocaleTimeString() : "✗ error al guardar";
+    } catch { $("guardado").textContent = "✗ servidor no responde"; }
+  }, 400);
+}
+
+$("timeline").onclick = e => {
+  const r = e.currentTarget.getBoundingClientRect();
+  video.currentTime = (e.clientX - r.left) / r.width * (video.duration || 0);
+};
+
+$("btnCaps").onclick = () => {
+  const caps = datos[actual].capitulos_youtube || [];
+  if (!caps.length) return;
+  caps.forEach(c => segs().push({ id: nuevoId(), tema: c.tema, inicio: c.inicio, fin: c.fin, notas: "capítulo YT" }));
+  pintar(); pintarLista(); guardar();
+};
+
+$("btnGuia").onclick = () => alternarGuia("creador");
+$("btnGuiaIA").onclick = () => alternarGuia("ia");
+$("btnGuiaCodex").onclick = () => alternarGuia("codex");
+$("btnGuiaCava").onclick = () => alternarGuia("cava");
+$("btnCapas").onclick = () => { localStorage.setItem("capas_cava", localStorage.getItem("capas_cava") === "off" ? "on" : "off"); aplicarCava(); };
+$("btnSoloCava").onclick = alternarSoloCava;
+
+$("btnImportIA").onclick = () => {
+  const sug = datos[actual].sugerencias_modelo || [];
+  sug.forEach(c => segs().push({ id: nuevoId(), tema: c.tema, inicio: c.inicio, fin: c.fin, notas: "sugerencia IA" }));
+  pintar(); pintarLista(); guardar();
+};
+
+// el análisis usa el modelo seleccionado en "Cortes sugeridos" (Creador → Opus, que no es un modelo)
+const motorSel = () => fuenteSug === "codex" ? "codex" : "claude";
+const nombreMotor = () => motorSel() === "codex" ? "Codex" : "Opus";
+
+$("btnAnalizar").onclick = async () => {
+  const v = datos[actual];
+  const previas = motorSel() === "codex" ? v.sugerencias_codex : v.sugerencias_modelo;
+  if (previas?.length && !$("btnAnalizar").classList.contains("confirmar")) {
+    // ya hay sugerencias: segundo clic para rehacer
+    $("btnAnalizar").classList.add("confirmar"); $("btnAnalizar").textContent = `¿Rehacer análisis con ${nombreMotor()}? clic otra vez`;
+    setTimeout(() => { $("btnAnalizar").classList.remove("confirmar"); actualizarBotonesIA(); }, 3000);
+    return;
+  }
+  $("btnAnalizar").classList.remove("confirmar");
+  await fetch("/api/procesar", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: actual, tipo: "analizar", motor: motorSel() }) });
+  revisarDescargas();
+};
+
+function actualizarBotonesIA() {
+  const v = actual && datos[actual];
+  if (!v) return;
+  const n = v.sugerencias_modelo?.length || 0;
+  $("btnAnalizar").textContent = `Transcribir + analizar (${nombreMotor()})`;
+  $("btnAnalizar").title = `Transcribe con whisper (local) y pide los cortes a ${nombreMotor()}, solo con el texto. El modelo se elige en "Cortes sugeridos"`;
+  $("btnImportIA").disabled = !n;
+  $("btnImportIA").title = n ? `Copiar los ${n} cortes de la IA (${v.sugerencias_info?.modelo}, ${v.sugerencias_info?.fecha}) a tus segmentos` : "Aún no hay sugerencias";
+}
+
+$("btnSubs").onclick = () => {
+  subsOn = !subsOn;
+  if (video.textTracks[0]) video.textTracks[0].mode = subsOn ? "showing" : "hidden";
+  $("btnSubs").textContent = "Subtítulos: " + (subsOn ? "on" : "off");
+};
+
+video.addEventListener("timeupdate", () => {
+  const dur = video.duration || 1;
+  $("cabezal").style.left = $("cabezalCava").style.left = (video.currentTime / dur * 100) + "%";
+  $("tiempo").textContent = fmt(video.currentTime);
+  if (pendiente != null) pintarPendiente();
+  if (!video.paused) seguirCabezal();
+  if (actual) localStorage.setItem("t_" + actual, video.currentTime);
+});
+video.addEventListener("ratechange", () => $("vel").textContent = video.playbackRate + "x");
+
+document.addEventListener("keydown", e => {
+  if (e.target.tagName === "INPUT" || !actual) return;
+  const t = video.currentTime, k = e.key.toLowerCase();
+  const paso = e.ctrlKey ? 30 : e.shiftKey ? 1 : 5;
+  const VELS = [0.5, 1, 1.25, 1.5, 2, 2.5, 3];
+  let ok = true;
+  if (k === " ") video.paused ? video.play() : video.pause();
+  else if (k === "arrowleft") video.currentTime = Math.max(0, t - paso);
+  else if (k === "arrowright") video.currentTime = t + paso;
+  else if (k === ",") { video.pause(); video.currentTime = Math.max(0, t - 1 / 30); }
+  else if (k === ".") { video.pause(); video.currentTime = t + 1 / 30; }
+  else if (k === "[" || k === "]") {
+    const i = VELS.indexOf(video.playbackRate);
+    video.playbackRate = VELS[Math.max(0, Math.min(VELS.length - 1, (i < 0 ? 1 : i) + (k === "]" ? 1 : -1)))];
+  }
+  else if (k === "i") { pendiente = t; pintarPendiente(); }
+  else if (k === "o") {
+    if (pendiente == null) {
+      // sin inicio marcado: el segmento empieza donde terminó el anterior (o en 0)
+      const prev = segs().filter(s => s.fin <= t).pop();
+      pendiente = prev ? prev.fin : 0;
+    }
+    const s = cerrarSegmento(t);
+    if (s) { video.pause(); enfocarTema(s); }
+  }
+  else if (k === "k") {
+    if (pendiente == null) { const prev = segs().filter(s => s.fin <= t).pop(); pendiente = prev ? prev.fin : 0; }
+    cerrarSegmento(t); pendiente = t; pintarPendiente();
+  }
+  else if (k === "g") alternarGuia("creador");
+  else if (k === "m") alternarGuia("ia");
+  else if (k === "x") alternarGuia("codex");
+  else if (k === "c") alternarGuia("cava");
+  else if (k === "v") $("btnCapas").click();
+  else if (k === "s") alternarSoloCava();
+  else if (k === "r" && cava[actual]) $("recPlay").click();
+  else if (k === "+" || k === "=") zoomA(zoomCapas * 1.5);
+  else if (k === "-") zoomA(zoomCapas / 1.5);
+  else if (k === "0") zoomA(1);
+  else if (k === "escape") { pendiente = null; pintarPendiente(); }
+  else if ((k === "delete" || k === "backspace") && selId != null) borrar(selId);
+  else if (k === "j" || k === "l") {
+    const lista = segs();
+    const s = k === "l" ? lista.find(x => x.inicio > t + 0.3) : [...lista].reverse().find(x => x.inicio < t - 0.3);
+    if (s) seleccionar(s.id, true);
+  }
+  else ok = false;
+  if (ok) e.preventDefault();
+});
+
+// --- Agregar videos nuevos ---
+let ocultas = new Set(), timerDesc = null, vistos = null, refrescar = new Set();
+
+$("formAgregar").onsubmit = async e => {
+  e.preventDefault();
+  const url = $("urlNueva").value.trim();
+  if (!url) return;
+  const r = await fetch("/api/descargar", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url }) });
+  const j = await r.json();
+  if (!r.ok) { $("urlNueva").style.borderColor = "#ff6f6f"; $("urlNueva").title = j.error; return; }
+  $("urlNueva").value = ""; $("urlNueva").style.borderColor = "";
+  revisarDescargas();
+};
+
+async function revisarDescargas() {
+  clearTimeout(timerDesc);
+  let lista;
+  try { lista = await (await fetch("/api/trabajos")).json(); } catch { return; }
+  if (vistos === null) {  // al cargar la página: solo interesa lo que sigue en curso
+    vistos = new Set(lista.filter(d => d.estado !== "en_curso").map(d => d.id));
+    vistos.forEach(id => ocultas.add(id));
+  }
+  // un intento queda obsoleto si hay otro posterior del mismo tipo y video/link
+  const clave = d => d.tipo + "|" + (d.tipo === "descargar" ? d.url : d.video + "|" + (d.motor || ""));
+  lista.forEach((d, i) => { if (lista.slice(i + 1).some(o => clave(o) === clave(d))) ocultas.add(d.id); });
+  const cont = $("descargas"); cont.innerHTML = "";
+  let hayNuevos = false;
+  for (const d of lista) {
+    if (ocultas.has(d.id)) continue;
+    const div = document.createElement("div");
+    div.className = "desc " + d.estado;
+    const nombre = d.tipo === "descargar" ? d.url : (datos[d.video]?.titulo || d.video);
+    const hecho = { descargar: "✓ Descargado", transcribir: "✓ Transcrito", analizar: `✓ Análisis ${d.motor === "codex" ? "Codex" : "Opus"} listo` }[d.tipo];
+    const texto = d.estado === "en_curso" ? `${d.etapa}… ${d.progreso.toFixed(0)}%`
+      : d.estado === "listo" ? hecho : "✗ " + esc(d.error || "Error");
+    div.innerHTML = `<span class="x" title="Quitar">✕</span>${texto}<br><small>${esc(nombre)}</small>`
+      + (d.estado === "en_curso" ? `<div class="prog"><div style="width:${d.progreso}%"></div></div>` : "");
+    div.querySelector(".x").onclick = () => { ocultas.add(d.id); revisarDescargas(); };
+    cont.appendChild(div);
+    if (d.estado === "listo" && d.video && !(d.video in datos)) hayNuevos = true;
+    if (d.estado === "listo" && d.tipo !== "descargar" && !vistos.has(d.id)) refrescar.add(d.video);
+    if (d.estado !== "en_curso") vistos.add(d.id);
+  }
+  if (refrescar.size) {
+    // trae la transcripción/sugerencias nuevas sin tocar los segmentos que estás editando
+    const todos = await (await fetch("/api/videos")).json();
+    for (const id of refrescar) if (datos[id] && todos[id]) {
+      for (const k of ["transcrito", "sugerencias_modelo", "sugerencias_info", "sugerencias_codex", "info_codex"]) datos[id][k] = todos[id][k];
+    }
+    refrescar.clear();
+    if (actual) { pintar(); actualizarBotonesIA(); }
+  }
+  if (hayNuevos) {
+    // solo añade los videos nuevos para no pisar lo que se está editando
+    const todos = await (await fetch("/api/videos")).json();
+    for (const [id, v] of Object.entries(todos)) if (!(id in datos)) datos[id] = v;
+    pintarLista();
+    if (!actual) abrir(Object.keys(datos)[0]);
+  }
+  if (lista.some(d => d.estado === "en_curso")) timerDesc = setTimeout(revisarDescargas, 1000);
+}
+
+aplicarGuia();
+aplicarCava();
+cargar();
+revisarDescargas();
+</script>
+</body>
+</html>

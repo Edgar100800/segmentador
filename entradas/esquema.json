@@ -1,0 +1,40 @@
+{
+  "type": "object",
+  "properties": {
+    "segmentos": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "tema": {
+            "type": "string"
+          },
+          "inicio": {
+            "type": "number"
+          },
+          "fin": {
+            "type": "number"
+          },
+          "resumen": {
+            "type": "string"
+          },
+          "razon": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "tema",
+          "inicio",
+          "fin",
+          "resumen",
+          "razon"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "segmentos"
+  ],
+  "additionalProperties": false
+}

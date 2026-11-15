@@ -1,0 +1,13 @@
+# Medios y datos: pesan mucho y llevan material con derechos (películas, videos de YouTube, diálogos)
+videos/
+clips/
+reels/
+cava/
+sugerencias/
+comparaciones/
+planes/
+segmentos.json
+entradas/*.prompt.md
+demo/*.mp4
+__pycache__/
+*.pyc
